@@ -1,0 +1,33 @@
+{
+  "type": "module",
+  "name": "sol-pixel-war",
+  "version": "1.0.0",
+  "scripts": {
+    "gen:model": "prisma generate",
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js"
+  },
+  "repository": "https://github.com/toannhu96/sol-pixel-war",
+  "author": "Toan Nhu <toanbk21096@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@dotenvx/dotenvx": "^1.6.4",
+    "@godaddy/terminus": "^4.12.1",
+    "@napi-rs/canvas": "^0.1.53",
+    "@prisma/client": "5.17.0",
+    "@solana/actions": "^1.4.0",
+    "@solana/web3.js": "^1.95.2",
+    "canvas": "^2.11.2",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "prettier": "^3.3.3",
+    "uuidv7": "^1.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.8.0",
+    "globals": "^15.8.0",
+    "nodemon": "^3.1.4",
+    "prisma": "^5.17.0"
+  }
+}
