@@ -60,8 +60,8 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
       console.log("Invalid input format", memoLog);
       res.status(400).json({ message: "Invalid input format" });
     }
-    const row = parts[0];
-    const col = parts[1];
+    const row = Number(String(parts[0]).charCodeAt(0) - 65);
+    const col = Number(parts[1]);
 
     await initializeBoard();
     const roundId = await prisma.minesweeperRound.aggregate({
