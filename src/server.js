@@ -76,8 +76,7 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
         data: {
           id: uuidv7(),
           tx: txHash,
-          // data: match[1],
-          data: "test",
+          data: match[1],
           roundId: roundId._max.id,
         },
       }),
