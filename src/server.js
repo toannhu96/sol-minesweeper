@@ -9,11 +9,13 @@ import { createTerminus } from "@godaddy/terminus";
 import {
   Connection,
   PublicKey,
+  Keypair,
   SystemProgram,
   Transaction,
   TransactionInstruction,
-  clusterApiUrl,
   LAMPORTS_PER_SOL,
+  clusterApiUrl,
+  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import { ACTIONS_CORS_HEADERS_MIDDLEWARE, createPostResponse } from "@solana/actions";
 import { uuidv7 } from "uuidv7";
@@ -25,9 +27,10 @@ const DEFAULT_SOL_ADDRESS = new PublicKey(process.env.DEFAULT_SOL_ADDRESS);
 const DEFAULT_SOL_AMOUNT = Number(process.env.DEFAULT_SOL_AMOUNT);
 const MINT = new PublicKey("SENDdRQtYMWaQrBroBrJ2Q53fgVuq95CV9UPGEvpCxa");
 const DEFAULT_MINT_AMOUNT = Number(process.env.DEFAULT_MINT_AMOUNT);
-const BONUS_MINT_AMOUNT = 1;
+const BONUS_MINT_AMOUNT = 10;
 const connection = new Connection(clusterApiUrl("mainnet-beta"));
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+const KEYPAIR = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(process.env.PRIVATE_KEY)));
 
 const app = express();
 app.set("trust proxy", 1);
@@ -49,7 +52,15 @@ app.get("/api/get-image", async (req, res) => {
 
 app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
   const payload = req.body;
+  // console.log(JSON.stringify(payload));
+
   try {
+    // init board
+    if (!board || board.length === 0) {
+      await initializeBoard();
+    }
+
+    // parse memo log for game data
     const logs = payload?.[0]?.meta?.logMessages;
     const txHash = payload?.[0]?.transaction?.signatures?.[0];
     const memoLog = logs.find((log) => log.includes("Program log: Memo "));
@@ -90,6 +101,54 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
       }),
     ]);
 
+    // transfer SEND if user wins
+    if (board && board.length > 0 && !board[row][col].isMine) {
+      try {
+        const memoLog = logs.find((log) => log.includes("Program log: Signed by "));
+        const addressRegex = /Signed by (\w+)/;
+        const match = memoLog.match(addressRegex);
+        if (match && match[1]) {
+          const toPubkey = new PublicKey(match[1]);
+          const fromPubkey = new PublicKey(KEYPAIR.publicKey);
+          const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+          const transaction = new Transaction({
+            feePayer: fromPubkey,
+            blockhash,
+            lastValidBlockHeight,
+          });
+
+          // Get the mint data (to adjust for decimals for amount)
+          const mintData = await getMint(connection, MINT);
+
+          // Get the sender's associated token account address
+          const senderTokenAccountAddress = await getAssociatedTokenAddress(MINT, fromPubkey);
+
+          // Get the receiver's associated token account address
+          const receiverTokenAccountAddress = await getAssociatedTokenAddress(MINT, toPubkey);
+
+          // Create an instruction to transfer 1 token from the sender's token account to the receiver's token account
+          const transferSendInstruction = await createTransferInstruction(
+            senderTokenAccountAddress,
+            receiverTokenAccountAddress,
+            fromPubkey,
+            (DEFAULT_MINT_AMOUNT + BONUS_MINT_AMOUNT) * 10 ** mintData.decimals,
+          );
+
+          transaction.add(transferSendInstruction);
+
+          // Sign the transaction with the sender's Keypair
+          transaction.sign(KEYPAIR);
+
+          // Send and confirm the transaction
+          const signature = await sendAndConfirmTransaction(connection, transaction, [KEYPAIR]);
+
+          console.log(`Transfer SEND complete with signature: ${signature}`);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
     res.json({ message: "Webhook received successfully" });
   } catch (err) {
     console.error(err);
@@ -123,7 +182,7 @@ async function getPlayAction(req, res) {
     const payload = {
       title: "Solana Minesweeper",
       icon: `${BASE_URL}/api/get-image`,
-      description: "Click, Reveal, and Win - Minesweeper on Solana Blink Awaits!",
+      description: `Play Minesweeper on Solana and win ${BONUS_MINT_AMOUNT} SEND for every move that doesn't hit a mine!`,
       links: {
         actions: isLose
           ? [
@@ -279,10 +338,21 @@ async function postPlayAction(req, res) {
 
     transaction.add(transferSendInstruction).add(memoInstruction);
 
+    // user input
+    let message = "Successful action!";
+    try {
+      const parts = String(data).split(":");
+      const col = Number(String(parts[0]).charCodeAt(0) - 65);
+      const row = Number(parts[1]);
+      message = board[row][col].isMine
+        ? "Boom! You hit a mine! Better luck next time."
+        : `Great move! You won ${BONUS_MINT_AMOUNT} SEND!`;
+    } catch (err) {}
+
     const payload = await createPostResponse({
       fields: {
         transaction,
-        message: `Successfully action, please refresh the page to see the changes.`,
+        message: `${message} Please refresh the page to see the changes.`,
       },
       // note: no additional signers are needed
       // signers: [],

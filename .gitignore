@@ -123,3 +123,5 @@ dist
 
 # turbo
 .turbo
+
+privatekey.json
