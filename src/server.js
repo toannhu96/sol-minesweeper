@@ -18,10 +18,14 @@ import {
 import { ACTIONS_CORS_HEADERS_MIDDLEWARE, createPostResponse } from "@solana/actions";
 import { uuidv7 } from "uuidv7";
 import { renderBoard, initializeBoard, gameCanvas, board, numCols, numRows } from "./controller/board.js";
+import { getMint, getAssociatedTokenAddress, createTransferInstruction } from "@solana/spl-token";
 
 const PORT = process.env.PORT || 3000;
 const DEFAULT_SOL_ADDRESS = new PublicKey(process.env.DEFAULT_SOL_ADDRESS);
 const DEFAULT_SOL_AMOUNT = Number(process.env.DEFAULT_SOL_AMOUNT);
+const MINT = new PublicKey("SENDdRQtYMWaQrBroBrJ2Q53fgVuq95CV9UPGEvpCxa");
+const DEFAULT_MINT_AMOUNT = Number(process.env.DEFAULT_MINT_AMOUNT);
+const BONUS_MINT_AMOUNT = 1;
 const connection = new Connection(clusterApiUrl("mainnet-beta"));
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
 
@@ -49,19 +53,23 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
     const logs = payload?.[0]?.meta?.logMessages;
     const txHash = payload?.[0]?.transaction?.signatures?.[0];
     const memoLog = logs.find((log) => log.includes("Program log: Memo "));
-    const match = memoLog.match(/: "([^"]+)"/);
+    if (!memoLog) {
+      console.log("No memo log found", logs);
+      return res.status(400).json({ message: "No memo log found" });
+    }
+    const match = String(memoLog).match(/: "([^"]+)"/);
     if (!match) {
       console.log("Invalid input format", memoLog);
-      res.status(400).json({ message: "Invalid input format" });
+      return res.status(400).json({ message: "Invalid input format" });
     }
 
     const parts = match[1].split(":");
     if (parts.length !== 2) {
       console.log("Invalid input format", memoLog);
-      res.status(400).json({ message: "Invalid input format" });
+      return res.status(400).json({ message: "Invalid input format" });
     }
-    const row = Number(String(parts[0]).charCodeAt(0) - 65);
-    const col = Number(parts[1]);
+    const col = Number(String(parts[0]).charCodeAt(0) - 65);
+    const row = Number(parts[1]);
 
     await initializeBoard();
     const roundId = await prisma.minesweeperRound.aggregate({
@@ -158,6 +166,7 @@ async function resetGame(req, res) {
     }
 
     const fromPubkey = new PublicKey(account);
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
 
     // create an instruction to transfer native SOL from one wallet to another
     const transferSolInstruction = SystemProgram.transfer({
@@ -165,23 +174,36 @@ async function resetGame(req, res) {
       toPubkey: toPubkey,
       lamports: DEFAULT_SOL_AMOUNT * LAMPORTS_PER_SOL,
     });
-
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-
-    // create a legacy transaction
     const transaction = new Transaction({
       feePayer: fromPubkey,
       blockhash,
       lastValidBlockHeight,
     }).add(transferSolInstruction);
 
-    transaction.add(
-      new TransactionInstruction({
-        keys: [{ pubkey: fromPubkey, isSigner: true, isWritable: true }],
-        data: Buffer.from(data, "utf-8"),
-        programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
-      }),
+    // Get the mint data (to adjust for decimals for amount)
+    const mintData = await getMint(connection, MINT);
+
+    // Get the sender's associated token account address
+    const senderTokenAccountAddress = await getAssociatedTokenAddress(MINT, fromPubkey);
+
+    // Get the receiver's associated token account address
+    const receiverTokenAccountAddress = await getAssociatedTokenAddress(MINT, toPubkey);
+
+    // Create an instruction to transfer 1 token from the sender's token account to the receiver's token account
+    const transferSendInstruction = await createTransferInstruction(
+      senderTokenAccountAddress,
+      receiverTokenAccountAddress,
+      fromPubkey,
+      DEFAULT_MINT_AMOUNT * 10 ** mintData.decimals,
     );
+
+    const memoInstruction = new TransactionInstruction({
+      keys: [{ pubkey: fromPubkey, isSigner: true, isWritable: true }],
+      data: Buffer.from(data, "utf-8"),
+      programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
+    });
+
+    transaction.add(transferSendInstruction).add(memoInstruction);
 
     const payload = await createPostResponse({
       fields: {
@@ -218,6 +240,7 @@ async function postPlayAction(req, res) {
     }
 
     const fromPubkey = new PublicKey(account);
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
 
     // create an instruction to transfer native SOL from one wallet to another
     const transferSolInstruction = SystemProgram.transfer({
@@ -225,23 +248,36 @@ async function postPlayAction(req, res) {
       toPubkey: toPubkey,
       lamports: DEFAULT_SOL_AMOUNT * LAMPORTS_PER_SOL,
     });
-
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-
-    // create a legacy transaction
     const transaction = new Transaction({
       feePayer: fromPubkey,
       blockhash,
       lastValidBlockHeight,
     }).add(transferSolInstruction);
 
-    transaction.add(
-      new TransactionInstruction({
-        keys: [{ pubkey: fromPubkey, isSigner: true, isWritable: true }],
-        data: Buffer.from(data, "utf-8"),
-        programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
-      }),
+    // Get the mint data (to adjust for decimals for amount)
+    const mintData = await getMint(connection, MINT);
+
+    // Get the sender's associated token account address
+    const senderTokenAccountAddress = await getAssociatedTokenAddress(MINT, fromPubkey);
+
+    // Get the receiver's associated token account address
+    const receiverTokenAccountAddress = await getAssociatedTokenAddress(MINT, toPubkey);
+
+    // Create an instruction to transfer 1 token from the sender's token account to the receiver's token account
+    const transferSendInstruction = await createTransferInstruction(
+      senderTokenAccountAddress,
+      receiverTokenAccountAddress,
+      fromPubkey,
+      DEFAULT_MINT_AMOUNT * 10 ** mintData.decimals,
     );
+
+    const memoInstruction = new TransactionInstruction({
+      keys: [{ pubkey: fromPubkey, isSigner: true, isWritable: true }],
+      data: Buffer.from(data, "utf-8"),
+      programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
+    });
+
+    transaction.add(transferSendInstruction).add(memoInstruction);
 
     const payload = await createPostResponse({
       fields: {
