@@ -3,7 +3,7 @@ import { prisma } from "../config/db.js";
 
 export const numRows = 8;
 export const numCols = 8;
-export const numMines = 10;
+export const numMines = 20;
 const cellSize = 40;
 const canvasSize = cellSize * (numRows + 1);
 export let board = [];

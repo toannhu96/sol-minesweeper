@@ -178,7 +178,7 @@ async function getPlayAction(req, res) {
     if (board.length === 0) {
       await initializeBoard();
     }
-    const isLose = board.some((row) => row.some((cell) => cell.revealed && cell.isMine));
+    const isLose = board.some((row) => row.every((cell) => cell.revealed));
     const payload = {
       title: "Solana Minesweeper",
       icon: `${BASE_URL}/api/get-image`,
@@ -217,7 +217,6 @@ async function getPlayAction(req, res) {
 async function resetGame(req, res) {
   try {
     const toPubkey = DEFAULT_SOL_ADDRESS;
-    const { data } = validatedQueryParams(req.query);
     const { account } = req.body;
 
     if (!account) {
@@ -256,13 +255,7 @@ async function resetGame(req, res) {
       DEFAULT_MINT_AMOUNT * 10 ** mintData.decimals,
     );
 
-    const memoInstruction = new TransactionInstruction({
-      keys: [{ pubkey: fromPubkey, isSigner: true, isWritable: true }],
-      data: Buffer.from(data, "utf-8"),
-      programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
-    });
-
-    transaction.add(transferSendInstruction).add(memoInstruction);
+    transaction.add(transferSendInstruction);
 
     const payload = await createPostResponse({
       fields: {
@@ -386,9 +379,10 @@ async function revealCell(roundId, row, col) {
     if (!roundId) {
       throw new Error("Missing roundId");
     }
-    if (board.some((row) => row.some((cell) => cell.revealed && cell.isMine))) {
-      return;
-    }
+    // TODO: Let's user play even hit a mine
+    // if (board.some((row) => row.some((cell) => cell.revealed && cell.isMine))) {
+    //   return;
+    // }
     if (row < 0 || row >= numRows || col < 0 || col >= numCols) {
       return;
     }
