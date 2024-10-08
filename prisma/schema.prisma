@@ -38,6 +38,7 @@ model MinesweeperTxLog {
   owner         String?
   data          String
   roundId       Int
+  isWin         Boolean?
   createdAt     DateTime  @default(now())
 
   @@map("minesweeper_tx_logs")

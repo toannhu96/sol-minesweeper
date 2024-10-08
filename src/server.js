@@ -54,7 +54,7 @@ app.get("/api/get-image", async (req, res) => {
 
 app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
   const payload = req.body;
-  // console.log(JSON.stringify(payload));
+  console.log(JSON.stringify(payload));
 
   try {
     // init board
@@ -65,7 +65,7 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
     // parse memo log for game data
     const logs = payload?.[0]?.meta?.logMessages;
     const txHash = payload?.[0]?.transaction?.signatures?.[0];
-    const owner = payload?.[0]?.transaction?.message?.accountKeys?.[0]?.pubkey?.toString();
+    const owner = payload?.[0]?.transaction?.message?.accountKeys?.[0];
     const memoLog = logs.find((log) => log.includes("Program log: Memo "));
     if (!memoLog) {
       console.log("No memo log found", logs);
@@ -90,11 +90,14 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
     const row = Number(parts[1]);
 
     await initializeBoard();
+
     const roundId = await prisma.minesweeperRound.aggregate({
       _max: {
         id: true,
       },
     });
+
+    const isWin = board && board.length > 0 && !board[row][col].isMine;
 
     await Promise.all([
       revealCell(roundId._max.id, row, col),
@@ -105,12 +108,13 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
           owner,
           data: match[1],
           roundId: roundId._max.id,
+          isWin,
         },
       }),
     ]);
 
     // transfer SEND if user wins
-    if (board && board.length > 0 && !board[row][col].isMine) {
+    if (isWin) {
       try {
         const memoLog = logs.find((log) => log.includes("Program log: Signed by "));
         const addressRegex = /Signed by (\w+)/;
@@ -188,7 +192,9 @@ async function getPlayAction(req, res) {
     if (board.length === 0) {
       await initializeBoard();
     }
+
     const isLose = board.some((row) => row.every((cell) => cell.revealed));
+
     const payload = {
       title: "Solana Minesweeper",
       icon: `${BASE_URL}/api/get-image`,
@@ -312,12 +318,13 @@ async function mintScoreAction(req, res) {
       where: {
         roundId: round.id,
         owner: account,
+        isWin: true,
       },
     });
-
-    if (score === 0) {
-      return res.status(400).json({ message: "You haven't scored any yet!" });
+    if (score < 5) {
+      return res.status(400).json({ message: "Must have at least 5 score to mint NFT" });
     }
+
     const txData = await axios
       .post(`https://mint.underdogprotocol.com/api/candy-machines/o6hodQwvcssWcjhhtwPMA9YmKXUUhAHyAfHWFQtjUBC`, {
         account: "6Nu9WYbDkGP6BBdYtRncPdDyQMT8QCRqr2jABPb9SpZQ",
