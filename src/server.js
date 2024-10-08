@@ -16,11 +16,13 @@ import {
   LAMPORTS_PER_SOL,
   clusterApiUrl,
   sendAndConfirmTransaction,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import { ACTIONS_CORS_HEADERS_MIDDLEWARE, createPostResponse } from "@solana/actions";
 import { uuidv7 } from "uuidv7";
 import { renderBoard, initializeBoard, gameCanvas, board, numCols, numRows } from "./controller/board.js";
 import { getMint, getAssociatedTokenAddress, createTransferInstruction } from "@solana/spl-token";
+import axios from "axios";
 
 const PORT = process.env.PORT || 3000;
 const DEFAULT_SOL_ADDRESS = new PublicKey(process.env.DEFAULT_SOL_ADDRESS);
@@ -63,6 +65,7 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
     // parse memo log for game data
     const logs = payload?.[0]?.meta?.logMessages;
     const txHash = payload?.[0]?.transaction?.signatures?.[0];
+    const owner = payload?.[0]?.transaction?.message?.accountKeys?.[0]?.pubkey?.toString();
     const memoLog = logs.find((log) => log.includes("Program log: Memo "));
     if (!memoLog) {
       console.log("No memo log found", logs);
@@ -78,7 +81,11 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
     if (parts.length !== 2) {
       console.log("Invalid input format", memoLog);
       return res.status(400).json({ message: "Invalid input format" });
+    } else if (parts[0].length >= 5 || parts[1].length >= 5) {
+      console.log("Invalid input format", memoLog);
+      return res.status(400).json({ message: "Invalid input format" });
     }
+
     const col = Number(String(parts[0]).charCodeAt(0) - 65);
     const row = Number(parts[1]);
 
@@ -95,6 +102,7 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
         data: {
           id: uuidv7(),
           tx: txHash,
+          owner,
           data: match[1],
           roundId: roundId._max.id,
         },
@@ -160,12 +168,14 @@ app.post("/webhook", [adminAuthMiddleware], async (req, res) => {
 app.get("/actions.json", getActionsJson);
 app.get("/api/actions/play", getPlayAction);
 app.post("/api/actions/play", postPlayAction);
-app.post("/api/actions/reset", resetGame);
+app.post("/api/actions/reset", resetGameAction);
+app.post("/api/actions/mint_score", mintScoreAction);
 
 // Route handlers
 function getActionsJson(req, res) {
   const payload = {
     rules: [
+      { pathPattern: "/", apiPath: "/api/actions/play" },
       { pathPattern: "/*", apiPath: "/api/actions/*" },
       { pathPattern: "/api/actions/**", apiPath: "/api/actions/**" },
     ],
@@ -189,6 +199,10 @@ async function getPlayAction(req, res) {
               {
                 label: "Reset Game",
                 href: `${BASE_URL}/api/actions/reset`,
+              },
+              {
+                label: "Mint Your Score",
+                href: `${BASE_URL}/api/actions/mint_score`,
               },
             ]
           : [
@@ -214,7 +228,7 @@ async function getPlayAction(req, res) {
   }
 }
 
-async function resetGame(req, res) {
+async function resetGameAction(req, res) {
   try {
     const toPubkey = DEFAULT_SOL_ADDRESS;
     const { account } = req.body;
@@ -273,6 +287,52 @@ async function resetGame(req, res) {
       },
     });
     await initializeBoard();
+
+    res.json(payload);
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ error: err.message || "An unknown error occurred" });
+  }
+}
+
+async function mintScoreAction(req, res) {
+  try {
+    const { account } = req.body;
+    if (!account) {
+      throw new Error('Invalid "account" provided');
+    }
+
+    const round = await prisma.minesweeperRound.findFirst({
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    const score = await prisma.minesweeperTxLog.count({
+      where: {
+        roundId: round.id,
+        owner: account,
+      },
+    });
+
+    if (score === 0) {
+      return res.status(400).json({ message: "You haven't scored any yet!" });
+    }
+    const txData = await axios
+      .post(`https://mint.underdogprotocol.com/api/candy-machines/o6hodQwvcssWcjhhtwPMA9YmKXUUhAHyAfHWFQtjUBC`, {
+        account: "6Nu9WYbDkGP6BBdYtRncPdDyQMT8QCRqr2jABPb9SpZQ",
+        amount: 1,
+      })
+      .then((res) => res.data);
+
+    const payload = await createPostResponse({
+      fields: {
+        transaction: VersionedTransaction.deserialize(Buffer.from(txData.transaction, "base64")),
+        message: `Reset game successfully, please refresh the page to play.`,
+      },
+      // note: no additional signers are needed
+      // signers: [],
+    });
 
     res.json(payload);
   } catch (err) {
@@ -404,14 +464,6 @@ async function revealCell(roundId, row, col) {
           },
           data: {
             revealed: true,
-          },
-        }),
-        prisma.minesweeperRound.update({
-          where: {
-            id: roundId,
-          },
-          data: {
-            status: "LOST",
           },
         }),
       ]);

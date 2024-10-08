@@ -35,6 +35,7 @@ model MinesweeperRound {
 model MinesweeperTxLog {
   id            String    @id @default(uuid())
   tx            String
+  owner         String?
   data          String
   roundId       Int
   createdAt     DateTime  @default(now())
