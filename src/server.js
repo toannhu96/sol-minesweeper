@@ -200,12 +200,12 @@ async function getPlayAction(req, res) {
                 label: "Reset Game",
                 href: `${BASE_URL}/api/actions/reset`,
               },
+            ]
+          : [
               {
                 label: "Mint Your Score",
                 href: `${BASE_URL}/api/actions/mint_score`,
               },
-            ]
-          : [
               {
                 label: "Play",
                 href: `${BASE_URL}/api/actions/play?data={data}`,
